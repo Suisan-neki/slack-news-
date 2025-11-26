@@ -9,6 +9,15 @@ PR TIMES の医療×IT領域ニュースを抽出し、Slack に1日3回まと�
 - 件数が多い場合は上限（デフォルト20件）までに制限
 - 記事がない場合は「新着なし」を送信
 
+## セットアップ
+1. `.env.example` を `.env` にコピーし、Slack Webhook と PR TIMES RSS URL を設定  
+   ※外部ライブラリ不要の簡易 .env ローダーが `config.py` にあり、`.env` があれば自動で読み込みます。
+2. Python 3.10+ を用意（標準ライブラリのみ使用）
+
+### 環境変数
+- `SLACK_WEBHOOK_URL`: Slack Incoming Webhook の URL
+- `PRTIMES_RSS_URLS`: 取得する RSS URL をカンマ区切りで指定（デフォルト: `https://prtimes.jp/index.rdf`）
+
 ## 使い方
 
 ### 前提
@@ -27,6 +36,9 @@ python main.py --dry-run --verbose
 
 # 通常実行
 python main.py
+
+# ローカルのサンプルRSSで動作確認（network不要）
+PRTIMES_RSS_URLS=file://$(pwd)/sample_feed.xml python main.py --dry-run --verbose
 ```
 
 オプション:

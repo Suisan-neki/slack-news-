@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample PR TIMES</title>
+    <link>https://prtimes.jp/</link>
+    <description>Sample feed for local testing</description>
+    <item>
+      <title>AIで病院DXを支援する新システムを提供開始</title>
+      <link>https://example.com/1</link>
+      <pubDate>Wed, 01 Jan 2025 09:00:00 +0900</pubDate>
+      <description>医療現場のデジタル化を推進するクラウドサービスを発表</description>
+    </item>
+    <item>
+      <title>歯科向けクラウド予約アプリが新機能追加</title>
+      <link>https://example.com/2</link>
+      <pubDate>Wed, 01 Jan 2025 10:00:00 +0900</pubDate>
+      <description>歯科医院のIT活用を支援するSaaS</description>
+    </item>
+    <item>
+      <title>フィットネス向け新商品を発売</title>
+      <link>https://example.com/3</link>
+      <pubDate>Wed, 01 Jan 2025 11:00:00 +0900</pubDate>
+      <description>IT要素がないためフィルタで除外される例</description>
+    </item>
+  </channel>
+</rss>

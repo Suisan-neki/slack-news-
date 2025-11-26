@@ -10,6 +10,25 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
+def load_dotenv(path: str = ".env") -> None:
+    """外部ライブラリなしでシンプルな .env 読み込みを行う。"""
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+# .env があれば最初に読み込む
+load_dotenv()
+
 # Slack Webhook
 SLACK_WEBHOOK_URL: str | None = os.environ.get("SLACK_WEBHOOK_URL")
 
@@ -20,8 +39,10 @@ _rss_env = [
     if url.strip()
 ]
 
-# デフォルトは空。運用時に必ず RSS URL を設定してください。
-DEFAULT_RSS_FEEDS: list[str] = []
+# デフォルトは全件取得用の index.rdf。不要なら .env で上書きしてください。
+DEFAULT_RSS_FEEDS: list[str] = [
+    "https://prtimes.jp/index.rdf",
+]
 RSS_FEEDS: list[str] = _rss_env or DEFAULT_RSS_FEEDS
 
 # キーワード定義（編集しやすいようにここでまとめる）
@@ -63,4 +84,3 @@ FETCH_TIMEOUT: int = 10
 # 配信済みURLの保存先
 DATA_DIR = Path("data")
 SENT_URLS_PATH = DATA_DIR / "sent_urls.json"
-
