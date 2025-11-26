@@ -115,3 +115,5 @@ FETCH_TIMEOUT: int = 10
 # 配信済みURLの保存先
 DATA_DIR = Path("data")
 SENT_URLS_PATH = DATA_DIR / "sent_urls.json"
+# ログファイル（環境変数 LOG_FILE で指定。未指定なら標準出力のみ）
+LOG_FILE = os.environ.get("LOG_FILE") or None

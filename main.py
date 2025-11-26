@@ -135,10 +135,15 @@ def parse_args() -> argparse.Namespace:
 
 def configure_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-    )
+    log_format = "%(asctime)s %(levelname)s %(name)s - %(message)s"
+    if config.LOG_FILE:
+        handlers = [
+            logging.StreamHandler(),
+            logging.FileHandler(config.LOG_FILE, encoding="utf-8"),
+        ]
+        logging.basicConfig(level=level, format=log_format, handlers=handlers)
+    else:
+        logging.basicConfig(level=level, format=log_format)
 
 
 if __name__ == "__main__":
