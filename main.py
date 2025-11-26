@@ -14,6 +14,20 @@ from storage import load_sent_urls, save_sent_urls
 logger = logging.getLogger(__name__)
 
 
+def _count_keyword_hits(articles: list[Article]) -> tuple[int, int, int]:
+    med_kw = [kw.lower() for kw in config.MEDICAL_KEYWORDS]
+    it_kw = [kw.lower() for kw in config.IT_KEYWORDS]
+    med_count = it_count = both_count = 0
+    for a in articles:
+        text = f"{a.title} {a.summary or ''}".lower()
+        has_med = any(kw in text for kw in med_kw)
+        has_it = any(kw in text for kw in it_kw)
+        med_count += has_med
+        it_count += has_it
+        both_count += has_med and has_it
+    return med_count, it_count, both_count
+
+
 def build_message(articles: list[Article], now: datetime) -> str:
     if not articles:
         return "🩺🤖 本時間帯の PR TIMES 医療×IT 新着はありませんでした。"
@@ -50,6 +64,9 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
     fetched = fetch_all_feeds(feed_urls, timeout=config.FETCH_TIMEOUT)
     if not fetched:
         logger.warning("フィードから記事を取得できませんでした。")
+    else:
+        med_count, it_count, both_count = _count_keyword_hits(fetched)
+        logger.info("Keyword hits (before exclude): med=%d it=%d both=%d", med_count, it_count, both_count)
 
     filtered = filter_articles(
         fetched,

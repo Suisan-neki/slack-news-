@@ -46,7 +46,8 @@ def fetch_feed(feed_url: str, timeout: int = 10) -> List[Article]:
         logger.warning("XML parse error on %s: %s", feed_url, exc)
         return []
 
-    entries = root.findall(".//item")
+    # RSS 2.0: <item> / RSS 1.0 (RDF): <item> に名前空間が付くケースがある
+    entries = root.findall(".//item") or root.findall(".//{*}item")
     if not entries:
         # Atom 形式対応
         entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
@@ -107,4 +108,3 @@ def _parse_datetime(value: str) -> datetime | None:
         return dt
     except Exception:  # noqa: BLE001
         return None
-
