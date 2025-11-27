@@ -17,6 +17,8 @@ PR TIMES の医療×IT領域ニュースを抽出し、Slack に1日3回まと�
 ### 環境変数
 - `SLACK_WEBHOOK_URL`: Slack Incoming Webhook の URL
 - `PRTIMES_RSS_URLS`: 取得する RSS URL をカンマ区切りで指定（デフォルト: `https://prtimes.jp/index.rdf`）
+- `EXTRA_SOURCES`: 追加サイトをスクレイピングする場合に指定（カンマ区切り、例: `medicaltech,htwatch`）
+- `LOG_FILE`: ログをファイルに出力したい場合のパス
 
 ## 使い方
 
@@ -39,6 +41,9 @@ python main.py
 
 # ローカルのサンプルRSSで動作確認（network不要）
 PRTIMES_RSS_URLS=file://$(pwd)/sample_feed.xml python main.py --dry-run --verbose
+
+# 追加サイト（医療テックニュース/ヘルステックウォッチ）を有効化
+EXTRA_SOURCES=medicaltech,htwatch python main.py --dry-run --verbose
 ```
 
 オプション:

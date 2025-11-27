@@ -10,6 +10,7 @@ from fetcher import Article, fetch_all_feeds
 from filter import filter_articles
 from notifier import post_message
 from storage import load_sent_urls, save_sent_urls
+from extrasources import fetch_medicaltech, fetch_htwatch
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,22 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
     else:
         med_count, it_count, both_count = _count_keyword_hits(fetched)
         logger.info("Keyword hits (before exclude): med=%d it=%d both=%d", med_count, it_count, both_count)
+
+    # 追加スクレイピングソース
+    if config.EXTRA_SOURCES:
+        logger.info("Fetching extra sources: %s", ", ".join(config.EXTRA_SOURCES))
+    extra_articles: list[Article] = []
+    for src in config.EXTRA_SOURCES:
+        if src.lower() == "medicaltech":
+            extra_articles.extend(fetch_medicaltech(timeout=config.FETCH_TIMEOUT))
+        elif src.lower() == "htwatch":
+            extra_articles.extend(fetch_htwatch(timeout=config.FETCH_TIMEOUT))
+        else:
+            logger.warning("Unknown extra source: %s", src)
+    if extra_articles:
+        med_c, it_c, both_c = _count_keyword_hits(extra_articles)
+        logger.info("Extra sources keyword hits: med=%d it=%d both=%d", med_c, it_c, both_c)
+    fetched.extend(extra_articles)
 
     filtered = filter_articles(
         fetched,

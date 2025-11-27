@@ -45,6 +45,13 @@ DEFAULT_RSS_FEEDS: list[str] = [
 ]
 RSS_FEEDS: list[str] = _rss_env or DEFAULT_RSS_FEEDS
 
+# 追加スクレイピング対象（カンマ区切りで指定: medicaltech, htwatch）
+EXTRA_SOURCES: list[str] = [
+    src.strip()
+    for src in os.environ.get("EXTRA_SOURCES", "").split(",")
+    if src.strip()
+]
+
 # キーワード定義（編集しやすいようにここでまとめる）
 MEDICAL_KEYWORDS: list[str] = [
     "医療",
@@ -73,6 +80,28 @@ MEDICAL_KEYWORDS: list[str] = [
     "医療DX",
     "デジタルヘルス",
     "PHR",
+    "メディカル",
+    "ヘルス",
+    "ウェルネス",
+    "医療向け",
+    "医師向け",
+    "病院向け",
+    "医療法人",
+    "医薬品",
+    "薬品",
+    "薬剤師",
+    "診断",
+    "治療",
+    "臨床",
+    "入院",
+    "外来",
+    "処方",
+    "調剤",
+    "リハビリ",
+    "訪問診療",
+    "訪問看護",
+    "在宅医療",
+    "在宅看護",
 ]
 
 IT_KEYWORDS: list[str] = [
@@ -98,6 +127,9 @@ IT_KEYWORDS: list[str] = [
     "オンライン",
     "ソフトウェア",
     "API",
+    "デジタル化",
+    "IT化",
+    "情報システム",
 ]
 
 EXCLUDE_KEYWORDS: list[str] = [
