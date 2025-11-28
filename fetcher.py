@@ -18,6 +18,7 @@ class Article:
     published: str | None = None
     summary: str | None = None
     published_at: datetime | None = None
+    matched_keywords: list[str] | None = None  # マッチしたキーワードのリスト
 
 
 def fetch_all_feeds(feed_urls: Iterable[str], timeout: int = 10) -> List[Article]:

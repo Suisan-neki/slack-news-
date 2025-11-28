@@ -25,11 +25,36 @@ def filter_articles(
         text = f"{article.title} {article.summary or ''}".lower()
         if ng_kw and any(kw in text for kw in ng_kw):
             continue
-        if not any(kw in text for kw in med_kw):
+        
+        # マッチした医療系キーワードを収集
+        matched_med = [kw for kw in med_kw if kw in text]
+        if not matched_med:
             continue
-        if not any(kw in text for kw in it_kw):
+        
+        # マッチしたIT系キーワードを収集
+        matched_it = [kw for kw in it_kw if kw in text]
+        if not matched_it:
             continue
-        filtered.append(article)
+        
+        # マッチしたキーワードを記録（元の大文字小文字を保持）
+        matched_keywords = []
+        for kw in medical_keywords:
+            if kw.lower() in matched_med:
+                matched_keywords.append(kw)
+        for kw in it_keywords:
+            if kw.lower() in matched_it:
+                matched_keywords.append(kw)
+        
+        # 記事のコピーを作成してキーワードを追加
+        article_with_keywords = Article(
+            title=article.title,
+            link=article.link,
+            published=article.published,
+            summary=article.summary,
+            published_at=article.published_at,
+            matched_keywords=matched_keywords,
+        )
+        filtered.append(article_with_keywords)
 
     logger.info("Filtered %d articles -> %d", len(articles_list), len(filtered))
     return filtered

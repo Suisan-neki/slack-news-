@@ -10,7 +10,7 @@ from fetcher import Article, fetch_all_feeds
 from filter import filter_articles
 from notifier import post_message
 from storage import load_sent_urls, save_sent_urls
-from extrasources import fetch_medicaltech, fetch_htwatch
+from extrasources import fetch_medicaltech, fetch_htwatch, fetch_google_news, fetch_note
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +29,153 @@ def _count_keyword_hits(articles: list[Article]) -> tuple[int, int, int]:
     return med_count, it_count, both_count
 
 
+def _get_source_name(link: str) -> str:
+    """URLからソース名を取得する。"""
+    if "prtimes.jp" in link:
+        return "PR TIMES"
+    elif "news.google.com" in link:
+        return "Google News"
+    elif "medicaltech-news.com" in link:
+        return "医療テックニュース"
+    elif "ht-watch.com" in link:
+        return "ヘルステックウォッチ"
+    else:
+        return "その他"
+
+
+def _categorize_keywords(keywords: list[str], medical_keywords: list[str], it_keywords: list[str]) -> tuple[list[str], list[str]]:
+    """キーワードを医療系とIT系に分類する。"""
+    med_kw_lower = [kw.lower() for kw in medical_keywords]
+    it_kw_lower = [kw.lower() for kw in it_keywords]
+    
+    medical_matched = []
+    it_matched = []
+    
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if kw_lower in med_kw_lower:
+            medical_matched.append(kw)
+        if kw_lower in it_kw_lower:
+            it_matched.append(kw)
+    
+    return medical_matched, it_matched
+
+
 def build_message(articles: list[Article], now: datetime) -> str:
     if not articles:
-        return "🩺🤖 本時間帯の PR TIMES 医療×IT 新着はありませんでした。"
+        return "🩺🤖 本時間帯の医療×IT新着はありませんでした。"
 
-    header = f"🩺🤖 PR TIMES 医療×ITニュースまとめ（{now.strftime('%Y-%m-%d %H:%M JST')}）"
+    header = f"🩺🤖 *医療×ITニュースまとめ*（{now.strftime('%Y-%m-%d %H:%M JST')}）"
     lines = [header, ""]
+    
+    # ソース別にグループ化
+    from collections import defaultdict
+    articles_by_source = defaultdict(list)
     for article in articles:
-        lines.append(f"・{article.title}")
-        lines.append(f"  {article.link}")
-        if article.published:
-            lines.append(f"  公開: {article.published}")
+        source = _get_source_name(article.link)
+        articles_by_source[source].append(article)
+    
+    # 記事をソース別に表示（優先度順）
+    idx = 1
+    # ソースの優先度順（PR TIMESが最優先、「その他」が最下位）
+    source_priority = {
+        "PR TIMES": 1,
+        "医療テックニュース": 2,
+        "ヘルステックウォッチ": 3,
+        "Google News": 4,
+        "その他": 5,
+    }
+    
+    for source in sorted(articles_by_source.keys(), key=lambda s: source_priority.get(s, 99)):
+        source_articles = articles_by_source[source]
+        lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"📰 *{source}* ({len(source_articles)}件)")
         lines.append("")
+        
+        for article in source_articles:
+            # タイトルをハイパーリンク形式にする
+            lines.append(f"*{idx}. <{article.link}|{article.title}>*")
+            
+            idx += 1
+            if idx <= len(articles):  # 最後の記事以外は空行を追加
+                lines.append("")
+    
+    lines.append("")
+    footer = f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 合計 *{len(articles)}件*の記事を配信"
+    lines.append(footer)
+    
     return "\n".join(lines).rstrip()
+
+
+def _normalize_title(title: str) -> str:
+    """タイトルを正規化して比較用にする。"""
+    import re
+    # 記号、空白、改行を削除して小文字に変換
+    normalized = re.sub(r'[^\w]', '', title.lower())
+    return normalized
+
+
+def _get_source_priority(link: str) -> int:
+    """ソースの優先度を返す（数値が小さいほど優先度が高い）。"""
+    if "prtimes.jp" in link:
+        return 1  # PR TIMESが最優先
+    elif "medicaltech-news.com" in link:
+        return 2
+    elif "ht-watch.com" in link:
+        return 3
+    elif "news.google.com" in link:
+        return 4  # Google Newsは「その他」より優先
+    else:
+        return 5  # その他が最下位
+
+
+def deduplicate_articles(articles: list[Article]) -> list[Article]:
+    """URLとタイトルの重複を除去する（PR TIMESを最優先）。"""
+    # まずURLで重複を除去
+    seen_urls: set[str] = set()
+    url_deduplicated: list[Article] = []
+    for article in articles:
+        if not article.link:
+            continue
+        # URLを正規化（末尾のスラッシュやクエリパラメータを考慮）
+        normalized_url = article.link.rstrip("/").split("?")[0]
+        if normalized_url not in seen_urls:
+            seen_urls.add(normalized_url)
+            url_deduplicated.append(article)
+    
+    # タイトルの重複を除去（優先度の高いソースを残す）
+    # タイトルを正規化してグループ化
+    title_groups: dict[str, list[Article]] = {}
+    for article in url_deduplicated:
+        if not article.title:
+            continue
+        normalized_title = _normalize_title(article.title)
+        if normalized_title not in title_groups:
+            title_groups[normalized_title] = []
+        title_groups[normalized_title].append(article)
+    
+    # 各グループから優先度の高い記事を1つ選ぶ
+    deduplicated: list[Article] = []
+    for normalized_title, group_articles in title_groups.items():
+        if len(group_articles) == 1:
+            # 重複なし
+            deduplicated.append(group_articles[0])
+        else:
+            # 優先度の高いソースの記事を選ぶ
+            group_articles.sort(key=lambda a: _get_source_priority(a.link))
+            deduplicated.append(group_articles[0])
+            if len(group_articles) > 1:
+                logger.debug(
+                    "Removed %d duplicate titles (kept from %s): %s",
+                    len(group_articles) - 1,
+                    _get_source_name(group_articles[0].link),
+                    group_articles[0].title[:50],
+                )
+    
+    removed_count = len(articles) - len(deduplicated)
+    if removed_count > 0:
+        logger.info("Removed %d duplicate articles (by URL and title)", removed_count)
+    return deduplicated
 
 
 def sort_articles(articles: list[Article]) -> list[Article]:
@@ -52,38 +186,64 @@ def sort_articles(articles: list[Article]) -> list[Article]:
     )
 
 
-def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int | None = None) -> int:
+def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int | None = None, manual: bool = False) -> int:
     storage_path = storage_path or config.SENT_URLS_PATH
-    max_items = max_items or config.MAX_ARTICLES_PER_POST
-
-    feed_urls = config.RSS_FEEDS
-    if not feed_urls:
-        logger.error("RSS_FEEDS が空です。PRTIMES_RSS_URLS を環境変数で設定するか config.py を編集してください。")
-        return 1
-
-    logger.info("Starting fetch for %d feed(s)", len(feed_urls))
-    fetched = fetch_all_feeds(feed_urls, timeout=config.FETCH_TIMEOUT)
-    if not fetched:
-        logger.warning("フィードから記事を取得できませんでした。")
+    # 手動実行時は5件に制限、それ以外は指定されたmax_itemsまたはデフォルト値
+    if manual:
+        max_items = 5
     else:
-        med_count, it_count, both_count = _count_keyword_hits(fetched)
-        logger.info("Keyword hits (before exclude): med=%d it=%d both=%d", med_count, it_count, both_count)
+        max_items = max_items or config.MAX_ARTICLES_PER_POST
 
-    # 追加スクレイピングソース
+    fetched: list[Article] = []
+    
+    # RSSフィードから取得（オプション）
+    feed_urls = config.RSS_FEEDS
+    if feed_urls:
+        logger.info("Starting fetch for %d RSS feed(s)", len(feed_urls))
+        rss_articles = fetch_all_feeds(feed_urls, timeout=config.FETCH_TIMEOUT)
+        if not rss_articles:
+            logger.warning("RSSフィードから記事を取得できませんでした。")
+        else:
+            med_count, it_count, both_count = _count_keyword_hits(rss_articles)
+            logger.info("RSS keyword hits (before exclude): med=%d it=%d both=%d", med_count, it_count, both_count)
+            fetched.extend(rss_articles)
+    else:
+        logger.info("RSS_FEEDS が空のため、RSS取得をスキップします。")
+
+    # Webスクレイピングソース（優先）
     if config.EXTRA_SOURCES:
-        logger.info("Fetching extra sources: %s", ", ".join(config.EXTRA_SOURCES))
+        logger.info("Fetching web scraping sources: %s", ", ".join(config.EXTRA_SOURCES))
     extra_articles: list[Article] = []
     for src in config.EXTRA_SOURCES:
-        if src.lower() == "medicaltech":
-            extra_articles.extend(fetch_medicaltech(timeout=config.FETCH_TIMEOUT))
-        elif src.lower() == "htwatch":
-            extra_articles.extend(fetch_htwatch(timeout=config.FETCH_TIMEOUT))
-        else:
-            logger.warning("Unknown extra source: %s", src)
+        try:
+            if src.lower() == "medicaltech":
+                articles = fetch_medicaltech(timeout=config.FETCH_TIMEOUT)
+                extra_articles.extend(articles)
+                logger.info("Fetched %d articles from medicaltech-news", len(articles))
+            elif src.lower() == "htwatch":
+                articles = fetch_htwatch(timeout=config.FETCH_TIMEOUT)
+                extra_articles.extend(articles)
+                logger.info("Fetched %d articles from ht-watch", len(articles))
+            elif src.lower() == "googlenews" or src.lower() == "google-news":
+                articles = fetch_google_news(timeout=config.FETCH_TIMEOUT)
+                extra_articles.extend(articles)
+                logger.info("Fetched %d articles from Google News", len(articles))
+            elif src.lower() == "note":
+                articles = fetch_note(timeout=config.FETCH_TIMEOUT)
+                extra_articles.extend(articles)
+                logger.info("Fetched %d articles from note.com", len(articles))
+            else:
+                logger.warning("Unknown extra source: %s", src)
+        except Exception as exc:
+            logger.exception("Failed to fetch from %s: %s", src, exc)
+    
     if extra_articles:
         med_c, it_c, both_c = _count_keyword_hits(extra_articles)
-        logger.info("Extra sources keyword hits: med=%d it=%d both=%d", med_c, it_c, both_c)
-    fetched.extend(extra_articles)
+        logger.info("Web scraping keyword hits (before exclude): med=%d it=%d both=%d", med_c, it_c, both_c)
+        fetched.extend(extra_articles)
+    
+    if not fetched:
+        logger.warning("すべてのソースから記事を取得できませんでした。")
 
     filtered = filter_articles(
         fetched,
@@ -91,12 +251,41 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
         it_keywords=config.IT_KEYWORDS,
         exclude_keywords=config.EXCLUDE_KEYWORDS,
     )
+    filtered = deduplicate_articles(filtered)
     filtered = sort_articles(filtered)
 
-    sent_map = load_sent_urls(storage_path)
-    new_articles = [a for a in filtered if a.link and a.link not in sent_map]
-    if len(new_articles) > max_items:
-        new_articles = new_articles[:max_items]
+    # 手動実行時は送信済みURLのチェックをスキップし、Google Newsを除外
+    if manual:
+        logger.info("Manual mode: skipping sent URL check, excluding Google News, limiting to %d articles", max_items)
+        # Google Newsを除外
+        filtered_without_google = [a for a in filtered if a.link and "news.google.com" not in a.link]
+        logger.info("Excluded Google News: %d articles remaining (from %d total)", len(filtered_without_google), len(filtered))
+        new_articles = filtered_without_google
+        if len(new_articles) > max_items:
+            new_articles = new_articles[:max_items]
+    else:
+        # 送信済みURLをチェック（同じ日の別の時間帯でも重複を防ぐ）
+        sent_map = load_sent_urls(storage_path)
+        logger.info("Loaded %d sent URLs from storage", len(sent_map))
+        
+        new_articles = []
+        skipped_count = 0
+        for article in filtered:
+            if not article.link:
+                continue
+            # URLを正規化してチェック（既存データとの互換性のため、元のURLと正規化URLの両方をチェック）
+            normalized_url = article.link.rstrip("/").split("?")[0]
+            if article.link in sent_map or normalized_url in sent_map:
+                skipped_count += 1
+                logger.debug("Skipping already sent article: %s", article.title[:50])
+                continue
+            new_articles.append(article)
+        
+        if skipped_count > 0:
+            logger.info("Skipped %d already sent articles (from previous time slots)", skipped_count)
+        
+        if len(new_articles) > max_items:
+            new_articles = new_articles[:max_items]
 
     now = datetime.now(timezone(timedelta(hours=9)))
     message = build_message(new_articles, now)
@@ -113,19 +302,26 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
         logger.error("Slack 送信に失敗しました。")
         return 1
 
+    # 送信済みURLを保存（手動実行時も保存して、定時実行時に重複を防ぐ）
     if new_articles:
+        sent_map = load_sent_urls(storage_path)  # 最新の状態を再読み込み
         timestamp = now.isoformat()
         for article in new_articles:
-            sent_map[article.link] = timestamp
+            # URLを正規化して保存（重複チェックと同じ形式にする）
+            normalized_url = article.link.rstrip("/").split("?")[0]
+            sent_map[normalized_url] = timestamp
         save_sent_urls(sent_map, storage_path)
-        logger.info("Saved %d sent URLs to %s", len(new_articles), storage_path)
+        if manual:
+            logger.info("Manual mode: saved %d sent URLs to %s (to prevent duplicate in scheduled runs)", len(new_articles), storage_path)
+        else:
+            logger.info("Saved %d sent URLs to %s", len(new_articles), storage_path)
 
     return 0
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PR TIMES 医療×ITニュースをフィルタしてSlackに投稿します。",
+        description="医療×ITニュースをフィルタしてSlackに投稿します。",
     )
     parser.add_argument(
         "--dry-run",
@@ -146,6 +342,11 @@ def parse_args() -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="詳細ログを有効にする",
+    )
+    parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="手動実行モード（送信済みURLチェックをスキップし、5件に制限）",
     )
     return parser.parse_args()
 
@@ -170,5 +371,6 @@ if __name__ == "__main__":
         dry_run=args.dry_run,
         storage_path=args.storage_path,
         max_items=args.max_items,
+        manual=args.manual,
     )
     raise SystemExit(exit_code)
