@@ -21,6 +21,48 @@ class Article:
     matched_keywords: list[str] | None = None  # マッチしたキーワードのリスト
 
 
+def _fetch_description_from_page(link: str, timeout: int) -> str | None:
+    """記事ページからdescriptionを取得する。"""
+    import re
+    import html
+    
+    try:
+        # Google NewsのリダイレクトURLの場合は、リダイレクト先を取得
+        if "news.google.com/rss/articles" in link:
+            # リダイレクト先のURLを取得
+            req = urllib.request.Request(link)
+            req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                actual_url = response.geturl()
+                link = actual_url
+        
+        with urllib.request.urlopen(link, timeout=timeout) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            text = response.read().decode(charset, errors="replace")
+        
+        # meta description を探す
+        desc_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', text, re.IGNORECASE)
+        if not desc_match:
+            # og:description を探す
+            desc_match = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', text, re.IGNORECASE)
+        
+        if desc_match:
+            description = desc_match.group(1)
+            # HTMLエンティティをデコード
+            description = html.unescape(description)
+            # HTMLタグを除去
+            description = re.sub(r'<[^>]+>', '', description)
+            description = description.strip()
+            
+            # サイト全体の説明文でないかチェック
+            if len(description) > 20 and "クリッピングサイト" not in description:
+                return description
+    except Exception:
+        pass
+    
+    return None
+
+
 def fetch_all_feeds(feed_urls: Iterable[str], timeout: int = 10) -> List[Article]:
     """複数の RSS/Atom フィードをまとめて取得する。"""
     articles: list[Article] = []
@@ -28,6 +70,15 @@ def fetch_all_feeds(feed_urls: Iterable[str], timeout: int = 10) -> List[Article
         try:
             fetched = fetch_feed(url, timeout=timeout)
             logger.info("Fetched %d articles from %s", len(fetched), url)
+            
+            # summaryが空または短い場合、記事ページからdescriptionを取得
+            for article in fetched:
+                if not article.summary or len(article.summary.strip()) < 50:
+                    page_description = _fetch_description_from_page(article.link, timeout)
+                    if page_description:
+                        article.summary = page_description
+                        logger.debug("Fetched description from page for: %s", article.title[:50])
+            
             articles.extend(fetched)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to fetch %s: %s", url, exc)
@@ -53,24 +104,52 @@ def fetch_feed(feed_url: str, timeout: int = 10) -> List[Article]:
         # Atom 形式対応
         entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
 
-    return [_element_to_article(entry) for entry in entries]
+    articles = []
+    for entry in entries:
+        article = _element_to_article(entry)
+        # タイトルとリンクが有効な記事のみを追加
+        if article.title and article.title != "(no title)" and article.link:
+            articles.append(article)
+    
+    return articles
 
 
 def _element_to_article(elem: ET.Element) -> Article:
+    import html
+    import re
+    
     title = _text(elem, "title")
     link = _link(elem)
+    
+    # 公開日の取得（複数の形式に対応）
     published = (
         _text(elem, "pubDate")
         or _text(elem, "published")
         or _text(elem, "updated")
+        or _text(elem, "date")  # RSS 1.0形式
+        or _text(elem, "{http://purl.org/dc/elements/1.1/}date")  # Dublin Core date
         or None
     )
+    
+    # 概要の取得（複数の形式に対応）
     summary = (
         _text(elem, "description")
         or _text(elem, "summary")
         or _text(elem, "{http://www.w3.org/2005/Atom}summary")
         or None
     )
+    
+    # summaryからHTMLタグを除去（RSSフィードにHTMLが含まれている場合がある）
+    if summary:
+        # HTMLタグを除去
+        summary = re.sub(r'<[^>]+>', '', summary)
+        # HTMLエンティティをデコード
+        summary = html.unescape(summary)
+        summary = summary.strip()
+        # 空になった場合はNoneにする
+        if not summary:
+            summary = None
+    
     published_at = _parse_datetime(published) if published else None
     return Article(
         title=title or "(no title)",
@@ -82,10 +161,21 @@ def _element_to_article(elem: ET.Element) -> Article:
 
 
 def _text(elem: ET.Element, tag: str) -> str:
+    # 通常のタグを探す
     child = elem.find(tag)
-    if child is None or child.text is None:
-        return ""
-    return child.text.strip()
+    if child is not None and child.text is not None:
+        return child.text.strip()
+    
+    # 名前空間付きタグも探す（RSS 1.0/RDF形式対応）
+    # すべての子要素を検索して、タグ名が一致するものを探す
+    tag_name = tag.split('}')[-1] if '}' in tag else tag
+    for child in elem.iter():
+        # タグ名が一致するかチェック（名前空間を無視）
+        if child.tag.endswith(f'}}{tag_name}') or child.tag == tag_name:
+            if child.text is not None:
+                return child.text.strip()
+    
+    return ""
 
 
 def _link(elem: ET.Element) -> str:
@@ -93,11 +183,20 @@ def _link(elem: ET.Element) -> str:
     link_text = _text(elem, "link")
     if link_text:
         return link_text
-    # Atom: <link href="..."/>
-    for child in elem.findall("link"):
-        href = child.attrib.get("href")
-        if href:
-            return href
+    
+    # 名前空間付きlinkタグも探す（RSS 1.0/RDF形式対応）
+    # すべての子要素を検索して、linkタグを探す
+    for child in elem.iter():
+        tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag_name == "link":
+            # RSS 1.0ではlinkタグのtextがURL
+            if child.text and child.text.strip():
+                return child.text.strip()
+            # Atom形式: <link href="..."/>
+            href = child.attrib.get("href")
+            if href:
+                return href
+    
     return ""
 
 

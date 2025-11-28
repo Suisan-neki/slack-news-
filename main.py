@@ -10,7 +10,7 @@ from fetcher import Article, fetch_all_feeds
 from filter import filter_articles
 from notifier import post_message
 from storage import load_sent_urls, save_sent_urls
-from extrasources import fetch_medicaltech, fetch_htwatch, fetch_google_news, fetch_note
+from extrasources import fetch_medicaltech, fetch_htwatch, fetch_google_news
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,21 @@ def build_message(articles: list[Article], now: datetime) -> str:
         for article in source_articles:
             # タイトルをハイパーリンク形式にする
             lines.append(f"*{idx}. <{article.link}|{article.title}>*")
+            
+            # 概要（description）があれば表示（最大150文字、文の途中で切らない）
+            if article.summary:
+                summary = article.summary.strip()
+                if len(summary) > 150:
+                    # 150文字以内で文の終わり（句点、改行）を探す
+                    truncated = summary[:150]
+                    # 最後の句点、改行、または適切な区切り位置を探す
+                    for delimiter in ['。', '\n', '.', '！', '？']:
+                        last_pos = truncated.rfind(delimiter)
+                        if last_pos > 100:  # 100文字以上は確保
+                            truncated = truncated[:last_pos + 1]
+                            break
+                    summary = truncated + "..."
+                lines.append(f"   {summary}")
             
             idx += 1
             if idx <= len(articles):  # 最後の記事以外は空行を追加
@@ -309,10 +324,6 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
                 articles = fetch_google_news(timeout=config.FETCH_TIMEOUT)
                 extra_articles.extend(articles)
                 logger.info("Fetched %d articles from Google News", len(articles))
-            elif src.lower() == "note":
-                articles = fetch_note(timeout=config.FETCH_TIMEOUT)
-                extra_articles.extend(articles)
-                logger.info("Fetched %d articles from note.com", len(articles))
             else:
                 logger.warning("Unknown extra source: %s", src)
         except Exception as exc:

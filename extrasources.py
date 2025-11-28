@@ -41,7 +41,10 @@ def fetch_medicaltech(timeout: int = 10) -> List[Article]:
         tm = re.search(r'<time[^>]*datetime="([^"]+)"', tail)
         published = tm.group(1) if tm else None
         
-        articles.append(Article(title=title, link=link, published=published))
+        # 概要（description）を取得（記事ページから取得を試みる）
+        summary = _fetch_summary_from_page(link, timeout)
+        
+        articles.append(Article(title=title, link=link, published=published, summary=summary))
     
     # 方法2: より柔軟なパターンでフォールバック
     if not articles:
@@ -54,7 +57,9 @@ def fetch_medicaltech(timeout: int = 10) -> List[Article]:
                 continue
             if not link.startswith("http"):
                 link = urljoin(url, link)
-            articles.append(Article(title=title, link=link, published=None))
+            # 概要を取得
+            summary = _fetch_summary_from_page(link, timeout)
+            articles.append(Article(title=title, link=link, published=None, summary=summary))
     
     logger.info("medicaltech-news: parsed %d articles", len(articles))
     return articles
@@ -83,7 +88,11 @@ def fetch_htwatch(timeout: int = 10) -> List[Article]:
             link = urljoin(url, link)
         
         published = _clean_html(m.group(3)) if m.group(3) else None
-        articles.append(Article(title=title, link=link, published=published))
+        
+        # 概要（description）を取得（記事ページから取得を試みる）
+        summary = _fetch_summary_from_page(link, timeout)
+        
+        articles.append(Article(title=title, link=link, published=published, summary=summary))
     
     # 方法2: より柔軟なパターンでフォールバック
     if not articles:
@@ -96,7 +105,9 @@ def fetch_htwatch(timeout: int = 10) -> List[Article]:
                 continue
             if not link.startswith("http"):
                 link = urljoin(url, link)
-            articles.append(Article(title=title, link=link, published=None))
+            # 概要を取得
+            summary = _fetch_summary_from_page(link, timeout)
+            articles.append(Article(title=title, link=link, published=None, summary=summary))
     
     logger.info("ht-watch: parsed %d articles", len(articles))
     return articles
@@ -120,87 +131,6 @@ def fetch_google_news(timeout: int = 10) -> List[Article]:
         return []
 
 
-def fetch_note(timeout: int = 10) -> List[Article]:
-    """note.comから医療×IT関連の記事を取得する。"""
-    import urllib.parse
-    
-    articles: list[Article] = []
-    
-    # note.comはJavaScriptで動的にコンテンツを読み込むため、
-    # 複数のアプローチを試す
-    
-    # 方法1: タグページから取得を試みる（医療、IT、医療DXなどのタグ）
-    tags = ["医療", "IT", "医療DX", "ヘルステック", "デジタルヘルス"]
-    for tag in tags:
-        tag_url = f"https://note.com/hashtag/{urllib.parse.quote(tag)}"
-        text = _get(tag_url, timeout)
-        if text is None:
-            continue
-        
-        # note.comの記事リンクパターンを探す
-        # /n/で始まる記事URLを探す
-        pattern = r'href="(/n/[a-zA-Z0-9]+)"'
-        for m in re.finditer(pattern, text):
-            link = m.group(1).strip()
-            if link:
-                full_link = urljoin("https://note.com", link)
-                # タイトルを取得するために記事ページにアクセス
-                article_text = _get(full_link, timeout)
-                if article_text:
-                    # タイトルを抽出
-                    title_match = re.search(r'<title[^>]*>(.*?)</title>', article_text, re.IGNORECASE | re.DOTALL)
-                    if title_match:
-                        title = _clean_html(title_match.group(1))
-                        # " | note"などのサフィックスを除去
-                        title = re.sub(r'\s*\|\s*note.*$', '', title, flags=re.IGNORECASE)
-                        if title and len(title) > 5:
-                            # 重複チェック
-                            if not any(a.link == full_link for a in articles):
-                                articles.append(Article(title=title, link=full_link, published=None))
-        
-        # 10件取得したら次のタグへ
-        if len(articles) >= 10:
-            break
-    
-    # 方法2: 検索結果ページから取得を試みる（User-Agentを設定）
-    if len(articles) < 5:
-        query = "医療 IT"
-        search_url = f"https://note.com/search?q={urllib.parse.quote(query)}&mode=search"
-        
-        # User-Agentを設定してリクエスト
-        try:
-            req = urllib.request.Request(search_url)
-            req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                charset = r.headers.get_content_charset() or "utf-8"
-                text = r.read().decode(charset, errors="replace")
-            
-            # 記事リンクを探す
-            pattern = r'href="(/n/[a-zA-Z0-9]+)"'
-            for m in re.finditer(pattern, text):
-                link = m.group(1).strip()
-                if link:
-                    full_link = urljoin("https://note.com", link)
-                    # 重複チェック
-                    if not any(a.link == full_link for a in articles):
-                        # タイトルを取得するために記事ページにアクセス
-                        article_text = _get(full_link, timeout)
-                        if article_text:
-                            title_match = re.search(r'<title[^>]*>(.*?)</title>', article_text, re.IGNORECASE | re.DOTALL)
-                            if title_match:
-                                title = _clean_html(title_match.group(1))
-                                title = re.sub(r'\s*\|\s*note.*$', '', title, flags=re.IGNORECASE)
-                                if title and len(title) > 5:
-                                    articles.append(Article(title=title, link=full_link, published=None))
-                                    if len(articles) >= 20:  # 最大20件
-                                        break
-        except Exception as exc:
-            logger.debug("Failed to fetch note.com search: %s", exc)
-    
-    logger.info("note.com: parsed %d articles", len(articles))
-    return articles
-
-
 def _get(url: str, timeout: int) -> str | None:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
@@ -218,4 +148,65 @@ def _get(url: str, timeout: int) -> str | None:
 def _clean_html(text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     return html.unescape(text).strip()
+
+
+def _fetch_summary_from_page(link: str, timeout: int) -> str | None:
+    """記事ページからsummary（description）を取得する共通関数。"""
+    try:
+        article_text = _get(link, timeout)
+        if not article_text:
+            return None
+        
+        # まずmeta description を探す
+        desc_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', article_text, re.IGNORECASE)
+        if not desc_match:
+            # og:description を探す
+            desc_match = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', article_text, re.IGNORECASE)
+        
+        if desc_match:
+            meta_desc = _clean_html(desc_match.group(1))
+            # サイト全体の説明文でないかチェック
+            if len(meta_desc) > 20 and "クリッピングサイト" not in meta_desc and "HealthTechWatchサイトは" not in meta_desc:
+                return meta_desc
+        
+        # meta descriptionが取得できない、またはサイト全体の説明の場合は、記事本文から抽出を試みる
+        # entryクラス内の本文を探す
+        entry_match = re.search(r'<article[^>]*class=["\']entry["\'][^>]*>(.*?)</article>', article_text, re.DOTALL | re.IGNORECASE)
+        if entry_match:
+            entry_content = entry_match.group(1)
+            # 最初の数個の<p>タグから本文を抽出
+            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', entry_content, re.DOTALL)
+            # 長い段落を探す（meta情報は短い）
+            for p in paragraphs:
+                clean_p = _clean_html(p).strip()
+                if len(clean_p) > 50:  # 50文字以上の段落を本文とみなす
+                    return clean_p
+        
+        # entryクラスがない場合、一般的な本文領域を探す
+        # main、content、post-contentなどのクラスを探す
+        for class_name in ['main', 'content', 'post-content', 'article-body', 'entry-content']:
+            content_match = re.search(
+                rf'<div[^>]*class=["\'][^"]*{class_name}[^"]*["\'][^>]*>(.*?)</div>',
+                article_text,
+                re.DOTALL | re.IGNORECASE
+            )
+            if content_match:
+                content = content_match.group(1)
+                paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', content, re.DOTALL)
+                for p in paragraphs:
+                    clean_p = _clean_html(p).strip()
+                    if len(clean_p) > 50:
+                        return clean_p
+        
+        # 最後の手段: 最初の長い<p>タグを探す
+        paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', article_text, re.DOTALL)
+        for p in paragraphs:
+            clean_p = _clean_html(p).strip()
+            if len(clean_p) > 50:
+                return clean_p
+                
+    except Exception:
+        pass  # 概要の取得に失敗しても続行
+    
+    return None
 
