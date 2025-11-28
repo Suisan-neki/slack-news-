@@ -115,6 +115,74 @@ def _normalize_title(title: str) -> str:
     return normalized
 
 
+def _calculate_title_similarity(title1: str, title2: str) -> float:
+    """2つのタイトルの類似度を計算する（0.0-1.0）。"""
+    norm1 = _normalize_title(title1)
+    norm2 = _normalize_title(title2)
+    
+    if not norm1 or not norm2:
+        return 0.0
+    
+    # 完全一致
+    if norm1 == norm2:
+        return 1.0
+    
+    # 短い方が長い方に含まれている場合（部分一致）
+    shorter = min(len(norm1), len(norm2))
+    longer = max(len(norm1), len(norm2))
+    
+    if shorter >= 10:  # 10文字以上の場合のみ部分一致をチェック
+        if len(norm1) <= len(norm2):
+            if norm1 in norm2:
+                # 部分一致の場合は、短い方の長さ / 長い方の長さで類似度を計算
+                # ただし、最低でも0.7以上にする（短いタイトルが長いタイトルの一部なら高類似度）
+                base_similarity = len(norm1) / len(norm2)
+                return max(base_similarity, 0.7)
+        else:
+            if norm2 in norm1:
+                base_similarity = len(norm2) / len(norm1)
+                return max(base_similarity, 0.7)
+    
+    # 先頭部分の一致もチェック（短い方の80%以上が長い方の先頭と一致する場合）
+    if shorter >= 5:
+        overlap_length = min(shorter, int(shorter * 0.8))
+        if len(norm1) <= len(norm2):
+            if norm1[:overlap_length] == norm2[:overlap_length]:
+                return 0.75  # 先頭が一致している場合は高類似度
+        else:
+            if norm2[:overlap_length] == norm1[:overlap_length]:
+                return 0.75
+    
+    # 共通文字数をカウント（順序は考慮しない）
+    common_chars = sum(1 for c in set(norm1) if c in norm2)
+    total_chars = len(set(norm1) | set(norm2))
+    
+    if total_chars == 0:
+        return 0.0
+    
+    # Jaccard類似度（文字集合の類似度）
+    jaccard_similarity = common_chars / total_chars
+    
+    # 長さの類似度も考慮
+    shorter = min(len(norm1), len(norm2))
+    longer = max(len(norm1), len(norm2))
+    length_similarity = shorter / longer if longer > 0 else 0.0
+    
+    # 共通部分文字列の長さを考慮（最長共通部分列の簡易版）
+    # 3文字以上の共通部分文字列があるかチェック
+    common_substring_score = 0.0
+    for i in range(len(norm1) - 2):
+        substring = norm1[i:i+3]
+        if substring in norm2:
+            common_substring_score = 0.2
+            break
+    
+    # 重み付き平均
+    similarity = (jaccard_similarity * 0.5) + (length_similarity * 0.3) + common_substring_score
+    
+    return min(similarity, 1.0)  # 1.0を超えないようにする
+
+
 def _get_source_priority(link: str) -> int:
     """ソースの優先度を返す（数値が小さいほど優先度が高い）。"""
     if "prtimes.jp" in link:
@@ -144,33 +212,46 @@ def deduplicate_articles(articles: list[Article]) -> list[Article]:
             url_deduplicated.append(article)
     
     # タイトルの重複を除去（優先度の高いソースを残す）
-    # タイトルを正規化してグループ化
-    title_groups: dict[str, list[Article]] = {}
+    # 類似度の閾値（0.75以上で重複とみなす）
+    SIMILARITY_THRESHOLD = 0.75
+    
+    deduplicated: list[Article] = []
     for article in url_deduplicated:
         if not article.title:
             continue
-        normalized_title = _normalize_title(article.title)
-        if normalized_title not in title_groups:
-            title_groups[normalized_title] = []
-        title_groups[normalized_title].append(article)
-    
-    # 各グループから優先度の高い記事を1つ選ぶ
-    deduplicated: list[Article] = []
-    for normalized_title, group_articles in title_groups.items():
-        if len(group_articles) == 1:
-            # 重複なし
-            deduplicated.append(group_articles[0])
-        else:
-            # 優先度の高いソースの記事を選ぶ
-            group_articles.sort(key=lambda a: _get_source_priority(a.link))
-            deduplicated.append(group_articles[0])
-            if len(group_articles) > 1:
-                logger.debug(
-                    "Removed %d duplicate titles (kept from %s): %s",
-                    len(group_articles) - 1,
-                    _get_source_name(group_articles[0].link),
-                    group_articles[0].title[:50],
-                )
+        
+        # 既に追加された記事と類似度をチェック
+        is_duplicate = False
+        for existing_article in deduplicated:
+            similarity = _calculate_title_similarity(article.title, existing_article.title)
+            if similarity >= SIMILARITY_THRESHOLD:
+                # 重複と判定された場合、優先度の高い方を残す
+                existing_priority = _get_source_priority(existing_article.link)
+                new_priority = _get_source_priority(article.link)
+                
+                if new_priority < existing_priority:
+                    # 新しい記事の方が優先度が高い場合、既存の記事を置き換え
+                    deduplicated.remove(existing_article)
+                    deduplicated.append(article)
+                    logger.debug(
+                        "Replaced duplicate article (similarity: %.2f, kept from %s): %s",
+                        similarity,
+                        _get_source_name(article.link),
+                        article.title[:50],
+                    )
+                else:
+                    # 既存の記事の方が優先度が高い場合、新しい記事をスキップ
+                    logger.debug(
+                        "Skipped duplicate article (similarity: %.2f, kept from %s): %s",
+                        similarity,
+                        _get_source_name(existing_article.link),
+                        article.title[:50],
+                    )
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            deduplicated.append(article)
     
     removed_count = len(articles) - len(deduplicated)
     if removed_count > 0:
