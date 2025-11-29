@@ -5,6 +5,8 @@ import logging
 import re
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from typing import List
 from urllib.parse import urljoin
 
@@ -44,7 +46,10 @@ def fetch_medicaltech(timeout: int = 10) -> List[Article]:
         # 概要（description）を取得（記事ページから取得を試みる）
         summary = _fetch_summary_from_page(link, timeout)
         
-        articles.append(Article(title=title, link=link, published=published, summary=summary))
+        # published文字列からpublished_atを設定
+        published_at = _parse_datetime(published) if published else None
+        
+        articles.append(Article(title=title, link=link, published=published, summary=summary, published_at=published_at))
     
     # 方法2: より柔軟なパターンでフォールバック
     if not articles:
@@ -59,7 +64,7 @@ def fetch_medicaltech(timeout: int = 10) -> List[Article]:
                 link = urljoin(url, link)
             # 概要を取得
             summary = _fetch_summary_from_page(link, timeout)
-            articles.append(Article(title=title, link=link, published=None, summary=summary))
+            articles.append(Article(title=title, link=link, published=None, summary=summary, published_at=None))
     
     logger.info("medicaltech-news: parsed %d articles", len(articles))
     return articles
@@ -92,7 +97,10 @@ def fetch_htwatch(timeout: int = 10) -> List[Article]:
         # 概要（description）を取得（記事ページから取得を試みる）
         summary = _fetch_summary_from_page(link, timeout)
         
-        articles.append(Article(title=title, link=link, published=published, summary=summary))
+        # published文字列からpublished_atを設定
+        published_at = _parse_datetime(published) if published else None
+        
+        articles.append(Article(title=title, link=link, published=published, summary=summary, published_at=published_at))
     
     # 方法2: より柔軟なパターンでフォールバック
     if not articles:
@@ -107,7 +115,7 @@ def fetch_htwatch(timeout: int = 10) -> List[Article]:
                 link = urljoin(url, link)
             # 概要を取得
             summary = _fetch_summary_from_page(link, timeout)
-            articles.append(Article(title=title, link=link, published=None, summary=summary))
+            articles.append(Article(title=title, link=link, published=None, summary=summary, published_at=None))
     
     logger.info("ht-watch: parsed %d articles", len(articles))
     return articles
@@ -210,3 +218,14 @@ def _fetch_summary_from_page(link: str, timeout: int) -> str | None:
     
     return None
 
+
+def _parse_datetime(value: str) -> datetime | None:
+    """日時文字列をdatetimeオブジェクトに変換する。"""
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt and dt.tzinfo is None:
+            # タイムゾーン情報がない場合はJSTと仮定
+            return dt.replace(tzinfo=timezone(timedelta(hours=9)))
+        return dt
+    except Exception:  # noqa: BLE001
+        return None

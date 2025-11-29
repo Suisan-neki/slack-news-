@@ -126,7 +126,10 @@ def _normalize_title(title: str) -> str:
     """タイトルを正規化して比較用にする。"""
     import re
     # 記号、空白、改行を削除して小文字に変換
-    normalized = re.sub(r'[^\w]', '', title.lower())
+    # 日本語の文字も含めるように改善
+    normalized = re.sub(r'[\s\u3000\u00A0\u2000-\u200B\u2028\u2029\uFEFF]', '', title.lower())
+    # 一般的な記号を削除
+    normalized = re.sub(r'[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]', '', normalized)
     return normalized
 
 
@@ -227,18 +230,36 @@ def deduplicate_articles(articles: list[Article]) -> list[Article]:
             url_deduplicated.append(article)
     
     # タイトルの重複を除去（優先度の高いソースを残す）
-    # 類似度の閾値（0.75以上で重複とみなす）
-    SIMILARITY_THRESHOLD = 0.75
+    # 類似度の閾値（0.7以上で重複とみなす）
+    SIMILARITY_THRESHOLD = 0.7
     
     deduplicated: list[Article] = []
+    # タイトルの正規化版をキャッシュして効率化
+    title_cache: dict[str, str] = {}
+    
     for article in url_deduplicated:
         if not article.title:
             continue
         
+        # タイトルを正規化
+        normalized_title = _normalize_title(article.title)
+        title_cache[article.title] = normalized_title
+        
         # 既に追加された記事と類似度をチェック
         is_duplicate = False
         for existing_article in deduplicated:
-            similarity = _calculate_title_similarity(article.title, existing_article.title)
+            if not existing_article.title:
+                continue
+            
+            # 完全一致チェック（正規化後）
+            existing_normalized = title_cache.get(existing_article.title, _normalize_title(existing_article.title))
+            if normalized_title == existing_normalized:
+                # 完全一致の場合は重複とみなす
+                similarity = 1.0
+            else:
+                # 類似度を計算
+                similarity = _calculate_title_similarity(article.title, existing_article.title)
+            
             if similarity >= SIMILARITY_THRESHOLD:
                 # 重複と判定された場合、優先度の高い方を残す
                 existing_priority = _get_source_priority(existing_article.link)
@@ -248,7 +269,7 @@ def deduplicate_articles(articles: list[Article]) -> list[Article]:
                     # 新しい記事の方が優先度が高い場合、既存の記事を置き換え
                     deduplicated.remove(existing_article)
                     deduplicated.append(article)
-                    logger.debug(
+                    logger.info(
                         "Replaced duplicate article (similarity: %.2f, kept from %s): %s",
                         similarity,
                         _get_source_name(article.link),
@@ -256,7 +277,7 @@ def deduplicate_articles(articles: list[Article]) -> list[Article]:
                     )
                 else:
                     # 既存の記事の方が優先度が高い場合、新しい記事をスキップ
-                    logger.debug(
+                    logger.info(
                         "Skipped duplicate article (similarity: %.2f, kept from %s): %s",
                         similarity,
                         _get_source_name(existing_article.link),
@@ -272,6 +293,63 @@ def deduplicate_articles(articles: list[Article]) -> list[Article]:
     if removed_count > 0:
         logger.info("Removed %d duplicate articles (by URL and title)", removed_count)
     return deduplicated
+
+
+def filter_by_time_range(articles: list[Article], now: datetime, hours_before: int = 6) -> list[Article]:
+    """指定された時間範囲内に公開された記事のみをフィルタリングする。
+    
+    Args:
+        articles: フィルタリング対象の記事リスト
+        now: 現在時刻（JST）
+        hours_before: 現在時刻から何時間前までを含めるか（デフォルト: 6時間）
+    
+    Returns:
+        フィルタリング後の記事リスト
+    """
+    if hours_before <= 0:
+        return articles
+    
+    time_start = now - timedelta(hours=hours_before)
+    
+    filtered: list[Article] = []
+    skipped_no_date = 0
+    skipped_old = 0
+    
+    for article in articles:
+        if article.published_at is None:
+            # 公開日時が不明な記事は除外（古い記事の可能性が高い）
+            skipped_no_date += 1
+            logger.debug("Skipping article with no published_at: %s", article.title[:50])
+            continue
+        
+        # タイムゾーンを統一（JSTに変換）
+        article_time = article.published_at
+        if article_time.tzinfo is None:
+            # タイムゾーン情報がない場合は、JSTと仮定
+            article_time = article_time.replace(tzinfo=timezone(timedelta(hours=9)))
+        else:
+            # JSTに変換
+            article_time = article_time.astimezone(timezone(timedelta(hours=9)))
+        
+        # 時間範囲内かチェック
+        if time_start <= article_time <= now:
+            filtered.append(article)
+        else:
+            skipped_old += 1
+            logger.debug(
+                "Skipping article outside time range (published: %s, range: %s - %s): %s",
+                article_time.strftime("%Y-%m-%d %H:%M"),
+                time_start.strftime("%Y-%m-%d %H:%M"),
+                now.strftime("%Y-%m-%d %H:%M"),
+                article.title[:50],
+            )
+    
+    if skipped_no_date > 0:
+        logger.info("Skipped %d articles with no published_at", skipped_no_date)
+    if skipped_old > 0:
+        logger.info("Skipped %d articles outside time range (%d hours before)", skipped_old, hours_before)
+    
+    return filtered
 
 
 def sort_articles(articles: list[Article]) -> list[Article]:
@@ -343,6 +421,11 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
         it_keywords=config.IT_KEYWORDS,
         exclude_keywords=config.EXCLUDE_KEYWORDS,
     )
+    
+    # 日時フィルタリング（実行時刻から6時間前〜現在時刻までの記事のみを対象）
+    now = datetime.now(timezone(timedelta(hours=9)))
+    filtered = filter_by_time_range(filtered, now, hours_before=6)
+    
     filtered = deduplicate_articles(filtered)
     filtered = sort_articles(filtered)
 
@@ -379,7 +462,7 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
         if len(new_articles) > max_items:
             new_articles = new_articles[:max_items]
 
-    now = datetime.now(timezone(timedelta(hours=9)))
+    # nowは既に定義済み（日時フィルタリングで使用）
     message = build_message(new_articles, now)
 
     logger.info("New articles: %d (after dedupe and limit)", len(new_articles))

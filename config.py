@@ -45,12 +45,15 @@ DEFAULT_RSS_FEEDS: list[str] = [
 ]
 RSS_FEEDS: list[str] = _rss_env or DEFAULT_RSS_FEEDS
 
-# 追加スクレイピング対象（カンマ区切りで指定: medicaltech, htwatch）
-EXTRA_SOURCES: list[str] = [
+# 追加スクレイピング対象（カンマ区切りで指定: medicaltech, htwatch, googlenews）
+# デフォルトは medicaltech, htwatch, googlenews を含む
+DEFAULT_EXTRA_SOURCES: list[str] = ["medicaltech", "htwatch", "googlenews"]
+_env_extra_sources = [
     src.strip()
     for src in os.environ.get("EXTRA_SOURCES", "").split(",")
     if src.strip()
 ]
+EXTRA_SOURCES: list[str] = _env_extra_sources if _env_extra_sources else DEFAULT_EXTRA_SOURCES
 
 # キーワード定義（編集しやすいようにここでまとめる）
 MEDICAL_KEYWORDS: list[str] = [
