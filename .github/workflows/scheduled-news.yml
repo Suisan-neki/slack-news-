@@ -42,10 +42,10 @@ jobs:
 
       - name: Upload sent URLs for next run
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: sent-urls
           path: data/sent_urls.json
-          if-no-files-found: ignore
           retention-days: 90
 
