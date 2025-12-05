@@ -5,12 +5,12 @@ import logging
 import re
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone, timedelta
-from email.utils import parsedate_to_datetime
 from typing import List
 from urllib.parse import urljoin
 
-from fetcher import Article
+from fetcher import Article, parse_datetime
+
+GOOGLE_NEWS_RECENCY_DAYS = 3  # Google Newsの検索対象期間（日数）
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def fetch_medicaltech(timeout: int = 10) -> List[Article]:
         summary = _fetch_summary_from_page(link, timeout)
         
         # published文字列からpublished_atを設定
-        published_at = _parse_datetime(published) if published else None
+        published_at = parse_datetime(published) if published else None
         
         articles.append(Article(title=title, link=link, published=published, summary=summary, published_at=published_at))
     
@@ -98,7 +98,7 @@ def fetch_htwatch(timeout: int = 10) -> List[Article]:
         summary = _fetch_summary_from_page(link, timeout)
         
         # published文字列からpublished_atを設定
-        published_at = _parse_datetime(published) if published else None
+        published_at = parse_datetime(published) if published else None
         
         articles.append(Article(title=title, link=link, published=published, summary=summary, published_at=published_at))
     
@@ -126,9 +126,9 @@ def fetch_google_news(timeout: int = 10) -> List[Article]:
     # GoogleニュースのRSSフィードを使用（医療×ITで検索）
     import urllib.parse
     from fetcher import fetch_feed
-    
-    query = "医療 IT"
-    rss_url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=ja&gl=JP&ceid=JP:ja"
+
+    query = f"医療 IT when:{GOOGLE_NEWS_RECENCY_DAYS}d"
+    rss_url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query)}&hl=ja&gl=JP&ceid=JP:ja&scoring=n"
     
     try:
         articles = fetch_feed(rss_url, timeout=timeout)
@@ -217,15 +217,3 @@ def _fetch_summary_from_page(link: str, timeout: int) -> str | None:
         pass  # 概要の取得に失敗しても続行
     
     return None
-
-
-def _parse_datetime(value: str) -> datetime | None:
-    """日時文字列をdatetimeオブジェクトに変換する。"""
-    try:
-        dt = parsedate_to_datetime(value)
-        if dt and dt.tzinfo is None:
-            # タイムゾーン情報がない場合はJSTと仮定
-            return dt.replace(tzinfo=timezone(timedelta(hours=9)))
-        return dt
-    except Exception:  # noqa: BLE001
-        return None

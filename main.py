@@ -77,16 +77,18 @@ def build_message(articles: list[Article], now: datetime) -> str:
     
     # 記事をソース別に表示（優先度順）
     idx = 1
-    # ソースの優先度順（PR TIMESが最優先、「その他」が最下位）
+    # ソースの優先度順（PR TIMESが最優先、Google Newsが最下位）
     source_priority = {
         "PR TIMES": 1,
         "医療テックニュース": 2,
         "ヘルステックウォッチ": 3,
-        "Google News": 4,
-        "その他": 5,
+        "Google News": 5,
     }
     
     for source in sorted(articles_by_source.keys(), key=lambda s: source_priority.get(s, 99)):
+        if source not in source_priority:
+            # 未知のソースは出さない
+            continue
         source_articles = articles_by_source[source]
         lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         lines.append(f"📰 *{source}* ({len(source_articles)}件)")
@@ -210,9 +212,9 @@ def _get_source_priority(link: str) -> int:
     elif "ht-watch.com" in link:
         return 3
     elif "news.google.com" in link:
-        return 4  # Google Newsは「その他」より優先
+        return 5  # Google News を最下位にする
     else:
-        return 5  # その他が最下位
+        return 5  # 未知のソースもGoogle Newsと同じ最下位扱い
 
 
 def deduplicate_articles(articles: list[Article]) -> list[Article]:
@@ -353,11 +355,22 @@ def filter_by_time_range(articles: list[Article], now: datetime, hours_before: i
 
 
 def sort_articles(articles: list[Article]) -> list[Article]:
-    return sorted(
-        articles,
-        key=lambda a: a.published_at.timestamp() if a.published_at else float("-inf"),
-        reverse=True,
-    )
+    """記事をソートする。優先キーワード（電子カルテ）を含む記事を優先し、その後公開日時でソート。"""
+    # 優先キーワード
+    PRIORITY_KEYWORD = "電子カルテ"
+    
+    def sort_key(article: Article) -> tuple[int, float]:
+        """ソートキー: (優先度, 公開日時)"""
+        # 優先キーワードを含むかチェック
+        text = f"{article.title} {article.summary or ''}".lower()
+        has_priority = PRIORITY_KEYWORD.lower() in text
+        # 優先度: 0=優先キーワードあり、1=なし
+        priority = 0 if has_priority else 1
+        # 公開日時（新しい順）
+        timestamp = article.published_at.timestamp() if article.published_at else float("-inf")
+        return (priority, -timestamp)  # タイムスタンプは負数にして降順にする
+    
+    return sorted(articles, key=sort_key)
 
 
 def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int | None = None, manual: bool = False) -> int:
@@ -420,11 +433,13 @@ def run(dry_run: bool = False, storage_path: Path | None = None, max_items: int 
         medical_keywords=config.MEDICAL_KEYWORDS,
         it_keywords=config.IT_KEYWORDS,
         exclude_keywords=config.EXCLUDE_KEYWORDS,
+        exclude_domains=config.EXCLUDE_DOMAINS,
     )
     
-    # 日時フィルタリング（実行時刻から6時間前〜現在時刻までの記事のみを対象）
+    # 日時フィルタリング（指定時間範囲の記事のみを対象）
     now = datetime.now(timezone(timedelta(hours=9)))
-    filtered = filter_by_time_range(filtered, now, hours_before=6)
+    logger.info("Applying time window: last %d hour(s)", config.TIME_RANGE_HOURS)
+    filtered = filter_by_time_range(filtered, now, hours_before=config.TIME_RANGE_HOURS)
     
     filtered = deduplicate_articles(filtered)
     filtered = sort_articles(filtered)

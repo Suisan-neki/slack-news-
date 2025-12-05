@@ -46,8 +46,8 @@ DEFAULT_RSS_FEEDS: list[str] = [
 RSS_FEEDS: list[str] = _rss_env or DEFAULT_RSS_FEEDS
 
 # 追加スクレイピング対象（カンマ区切りで指定: medicaltech, htwatch, googlenews）
-# デフォルトは medicaltech, htwatch, googlenews を含む
-DEFAULT_EXTRA_SOURCES: list[str] = ["medicaltech", "htwatch", "googlenews"]
+# デフォルトは Google News を除外し、medicaltech / htwatch のみ
+DEFAULT_EXTRA_SOURCES: list[str] = ["medicaltech", "htwatch"]
 _env_extra_sources = [
     src.strip()
     for src in os.environ.get("EXTRA_SOURCES", "").split(",")
@@ -156,6 +156,19 @@ EXCLUDE_KEYWORDS: list[str] = [
     "グルメ",
     "料理",
     "レシピ",
+
+    # 動物医療・ペット関連（人医療向けではない）
+    "動物病院",
+    "獣医",
+    "獣医師",
+    "動物医療",
+    "ペット",
+
+    # 物流/サプライチェーン中心の話題（医療提供とは無関係）
+    "サプライチェーン",
+    "サプライチェーンDX",
+    "物流",
+    "ロジスティクス",
     
     # ITキーワードの誤マッチ防止
     "クラウドファンディング",  # ITの「クラウド」と混同しないように除外
@@ -196,11 +209,30 @@ EXCLUDE_KEYWORDS: list[str] = [
     "家電",
 ]
 
+# .envで追加の除外キーワードを渡せるようにする（カンマ区切り）
+_env_exclude_keywords = [
+    kw.strip()
+    for kw in os.environ.get("EXCLUDE_EXTRA_KEYWORDS", "").split(",")
+    if kw.strip()
+]
+if _env_exclude_keywords:
+    EXCLUDE_KEYWORDS.extend(_env_exclude_keywords)
+
+# リンクドメインで除外する場合に使用（カンマ区切り）
+EXCLUDE_DOMAINS: list[str] = [
+    dom.strip().lower()
+    for dom in os.environ.get("EXCLUDE_DOMAINS", "").split(",")
+    if dom.strip()
+]
+
 # 1回あたりの投稿件数上限（Slack 文字数制限を考慮）
-MAX_ARTICLES_PER_POST: int = 20
+MAX_ARTICLES_PER_POST: int = 5
 
 # RSS 取得タイムアウト（秒）
 FETCH_TIMEOUT: int = 10
+
+# 取得対象とする時間範囲（時間単位）。デフォルトは直近6時間（定時3回/日の1枠）。
+TIME_RANGE_HOURS: int = int(os.environ.get("TIME_RANGE_HOURS", "6"))
 
 # 配信済みURLの保存先
 DATA_DIR = Path("data")

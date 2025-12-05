@@ -56,8 +56,11 @@ LOG_FILE=/path/to/cron.log
 - `EXTRA_SOURCES`: 追加サイトをスクレイピングする場合に指定（カンマ区切り）
   - `medicaltech`: 医療テックニュース
   - `htwatch`: ヘルステックウォッチ
-  - `googlenews` または `google-news`: Google News
+  - `googlenews` または `google-news`: Google News（デフォルトでは除外）
 - `LOG_FILE`: ログをファイルに出力したい場合のパス（オプション）
+- `EXCLUDE_EXTRA_KEYWORDS`: 除外キーワードをカンマ区切りで追加する（例: `求人,採用,転職`）
+- `EXCLUDE_DOMAINS`: 除外したいドメインをカンマ区切りで指定する（例: `example.com,foo.jp`）
+- `TIME_RANGE_HOURS`: 取得対象とする時間範囲（時間）。デフォルトは直近6時間（1コマ）を集計して送信します。
 
 ### 3. Python環境
 
@@ -85,6 +88,61 @@ python3 main.py
 - `--storage-path PATH`: 配信済みURLを保存するJSONのパス（デフォルト: `data/sent_urls.json`）
 - `--max-items N`: 1回の投稿に含める最大件数（デフォルト: 20）
 
+## 定時実行と重複防止
+
+### 定時実行を有効にする（macOS LaunchAgent想定）
+
+コードを更新した後は、LaunchAgentを再ロードして最新コードを使うようにします：
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.suisan.slack-news-09.plist
+launchctl unload ~/Library/LaunchAgents/com.suisan.slack-news-15.plist
+launchctl unload ~/Library/LaunchAgents/com.suisan.slack-news-21.plist
+launchctl load ~/Library/LaunchAgents/com.suisan.slack-news-09.plist
+launchctl load ~/Library/LaunchAgents/com.suisan.slack-news-15.plist
+launchctl load ~/Library/LaunchAgents/com.suisan.slack-news-21.plist
+```
+
+### 手動送信と定時送信の違い
+
+#### 手動送信（本番と分けて実行）
+
+```bash
+python3 main.py --manual --verbose
+```
+
+- Google Newsを除外
+- 5件に制限
+- 送信済みチェックをスキップ
+- 送信したURLは `data/sent_urls.json` に記録される
+- その後の定時実行では同じ記事を再送しない
+
+#### 定時送信
+
+```bash
+python3 main.py
+```
+
+- 直近24時間分から未送信のものだけ送信
+- 手動で送ったものも含め、`data/sent_urls.json` にあるURLは再送されない
+- 同じ日の別時間帯でも重複を防ぐ
+
+### 確認ポイント
+
+1. **`data/sent_urls.json` が消えないように確認**
+   - パスと権限が正しく設定されているか確認
+   - ファイルが存在し、書き込み可能であることを確認
+
+2. **環境変数の確認**
+   - `SLACK_WEBHOOK_URL` 環境変数が設定されているか確認
+
+3. **ログの確認**
+   - `cron.log` または `LOG_FILE` で以下のログを確認：
+     - `Loaded X sent URLs` - 送信済みURLの読み込み数
+     - `New articles: Y` - 新規記事数
+   - これらのログで重複抑止の動作が確認できます
+
+この状態で、手動配信済みの記事は次の定時配信から除外され、定時配信内でも同じ時間帯で重複は出ません。
 
 ## ディレクトリ構成
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Iterable, List
 
@@ -150,7 +151,7 @@ def _element_to_article(elem: ET.Element) -> Article:
         if not summary:
             summary = None
     
-    published_at = _parse_datetime(published) if published else None
+    published_at = parse_datetime(published) if published else None
     return Article(
         title=title or "(no title)",
         link=link,
@@ -200,11 +201,41 @@ def _link(elem: ET.Element) -> str:
     return ""
 
 
-def _parse_datetime(value: str) -> datetime | None:
+def parse_datetime(value: str) -> datetime | None:
+    """日時文字列をdatetimeに変換する（RFC2822 / ISO8601対応）。
+
+    タイムゾーンが付いていない場合はJST(+09:00)として扱う。
+    """
+
+    if not value:
+        return None
+
+    value = value.strip()
+
+    # まずRFC2822形式を試す
     try:
         dt = parsedate_to_datetime(value)
-        if dt and dt.tzinfo is None:
-            return dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
-        return dt
     except Exception:  # noqa: BLE001
+        dt = None
+
+    # ISO8601形式をフォールバックで試す
+    if dt is None:
+        iso_value = value.replace("Z", "+00:00")
+        # +0900 のような形式を +09:00 に整形
+        if re.match(r".*[+-]\d{4}$", iso_value):
+            iso_value = iso_value[:-5] + iso_value[-5:-2] + ":" + iso_value[-2:]
+        try:
+            dt = datetime.fromisoformat(iso_value)
+        except Exception:  # noqa: BLE001
+            dt = None
+
+    if dt is None:
         return None
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone(timedelta(hours=9)))
+    return dt
+
+
+# 後方互換用（既存の参照を保持）
+_parse_datetime = parse_datetime

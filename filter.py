@@ -13,15 +13,23 @@ def filter_articles(
     medical_keywords: Iterable[str],
     it_keywords: Iterable[str],
     exclude_keywords: Iterable[str] | None = None,
+    exclude_domains: Iterable[str] | None = None,
 ) -> List[Article]:
     """医療系とIT系の両方のキーワードを含む記事だけに絞り込む。"""
     articles_list = list(articles)
     med_kw = [kw.lower() for kw in medical_keywords]
     it_kw = [kw.lower() for kw in it_keywords]
     ng_kw = [kw.lower() for kw in (exclude_keywords or [])]
+    ng_domains = [dom.lower() for dom in (exclude_domains or [])]
 
     filtered: list[Article] = []
     for article in articles_list:
+        # ドメインで除外
+        if ng_domains and article.link:
+            link_lower = article.link.lower()
+            if any(dom in link_lower for dom in ng_domains):
+                continue
+
         text = f"{article.title} {article.summary or ''}".lower()
         if ng_kw and any(kw in text for kw in ng_kw):
             continue
