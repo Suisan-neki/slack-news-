@@ -27,7 +27,7 @@ jobs:
         with:
           name: sent-urls
           path: data/
-          if-no-artifact-found: ignore
+          if-no-files-found: ignore
 
       - name: Run news fetcher
         env:
@@ -46,5 +46,6 @@ jobs:
         with:
           name: sent-urls
           path: data/sent_urls.json
+          if-no-files-found: ignore
           retention-days: 90
 
