@@ -1,0 +1,50 @@
+name: 医療×ITニュース自動配信
+
+on:
+  schedule:
+    # JST 9時 = UTC 0時
+    - cron: '0 0 * * *'
+    # JST 15時 = UTC 6時
+    - cron: '0 6 * * *'
+    # JST 21時 = UTC 12時
+    - cron: '0 12 * * *'
+  workflow_dispatch: # 手動実行も可能
+
+jobs:
+  send-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download sent URLs from previous run
+        uses: actions/download-artifact@v4
+        with:
+          name: sent-urls
+          path: data/
+          if-no-artifact-found: ignore
+
+      - name: Run news fetcher
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          EXTRA_SOURCES: ${{ secrets.EXTRA_SOURCES }}
+          EXCLUDE_EXTRA_KEYWORDS: ${{ secrets.EXCLUDE_EXTRA_KEYWORDS }}
+          EXCLUDE_DOMAINS: ${{ secrets.EXCLUDE_DOMAINS }}
+          TIME_RANGE_HOURS: ${{ secrets.TIME_RANGE_HOURS }}
+        run: |
+          mkdir -p data
+          python3 main.py --verbose
+
+      - name: Upload sent URLs for next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sent-urls
+          path: data/sent_urls.json
+          retention-days: 90
+

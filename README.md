@@ -90,7 +90,33 @@ python3 main.py
 
 ## 定時実行と重複防止
 
-### 定時実行を有効にする（macOS LaunchAgent想定）
+### 定時実行方法
+
+#### 方法1: GitHub Actions（推奨・パソコンが起動していなくても動作）
+
+1. **GitHubリポジトリのSecretsに環境変数を設定**
+   - リポジトリの Settings → Secrets and variables → Actions に移動
+   - 以下のSecretsを追加：
+     - `SLACK_WEBHOOK_URL`: Slack Incoming Webhook の URL（必須）
+     - `EXTRA_SOURCES`: `medicaltech,htwatch,googlenews`（オプション）
+     - `EXCLUDE_EXTRA_KEYWORDS`: 除外キーワード（オプション、カンマ区切り）
+     - `EXCLUDE_DOMAINS`: 除外ドメイン（オプション、カンマ区切り）
+     - `TIME_RANGE_HOURS`: 時間範囲（オプション、デフォルト: 6）
+
+2. **ワークフローファイルの確認**
+   - `.github/workflows/scheduled-news.yml` が正しくコミットされているか確認
+   - スケジュールは自動的に設定されています（JST 9時、15時、21時）
+
+3. **動作確認**
+   - GitHubリポジトリの Actions タブで実行状況を確認
+   - 手動実行も可能（Actions → ワークフローを選択 → Run workflow）
+
+**メリット:**
+- パソコンが起動していなくても動作
+- 無料で利用可能
+- 実行ログがGitHub上で確認できる
+
+#### 方法2: macOS LaunchAgent（ローカル実行）
 
 コードを更新した後は、LaunchAgentを再ロードして最新コードを使うようにします：
 
@@ -102,6 +128,8 @@ launchctl load ~/Library/LaunchAgents/com.suisan.slack-news-09.plist
 launchctl load ~/Library/LaunchAgents/com.suisan.slack-news-15.plist
 launchctl load ~/Library/LaunchAgents/com.suisan.slack-news-21.plist
 ```
+
+**注意:** パソコンが起動していてログインしている場合のみ動作します。スリープ中や電源オフ時は実行されません。
 
 ### 手動送信と定時送信の違い
 
