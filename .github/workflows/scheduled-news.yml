@@ -2,13 +2,18 @@ name: 医療×ITニュース自動配信
 
 on:
   schedule:
-    # JST 9時 = UTC 0時
-    - cron: '0 0 * * *'
-    # JST 15時 = UTC 6時
-    - cron: '0 6 * * *'
-    # JST 21時 = UTC 12時
-    - cron: '0 12 * * *'
+    # JST 9時 = UTC 0時（5分に設定して遅延を回避）
+    - cron: '5 0 * * *'
+    # JST 15時 = UTC 6時（5分に設定して遅延を回避）
+    - cron: '5 6 * * *'
+    # JST 21時 = UTC 12時（5分に設定して遅延を回避）
+    - cron: '5 12 * * *'
   workflow_dispatch: # 手動実行も可能
+
+# 同時実行を防ぐ（同じ時間に複数回実行されないようにする）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false  # 既に実行中のものはキャンセルしない（完了を待つ）
 
 jobs:
   send-news:
