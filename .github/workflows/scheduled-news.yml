@@ -11,6 +11,7 @@ on:
   workflow_dispatch: # 手動実行も可能
 
 # 同時実行を防ぐ（同じ時間に複数回実行されないようにする）
+# すべての実行を同じグループにして、同時実行を完全に防ぐ
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true  # 既に実行中のものはキャンセルして、新しい実行のみを実行
