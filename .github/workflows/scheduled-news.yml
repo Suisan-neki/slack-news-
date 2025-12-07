@@ -27,12 +27,35 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Get previous workflow run ID
+        id: previous-run
+        continue-on-error: true
+        run: |
+          WORKFLOW_ID=$(curl -s -H "Authorization: token ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows" | \
+            jq -r ".workflows[] | select(.name == \"${{ github.workflow }}\") | .id")
+          
+          PREV_RUN_ID=$(curl -s -H "Authorization: token ${{ github.token }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/runs?branch=${{ github.ref_name }}&per_page=2" | \
+            jq -r '.workflow_runs[1].id // empty')
+          
+          if [ -n "$PREV_RUN_ID" ] && [ "$PREV_RUN_ID" != "null" ]; then
+            echo "run-id=$PREV_RUN_ID" >> $GITHUB_OUTPUT
+            echo "Found previous run ID: $PREV_RUN_ID"
+          else
+            echo "No previous run found"
+          fi
+
       - name: Download sent URLs from previous run
+        if: steps.previous-run.outputs.run-id != ''
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: sent-urls
           path: data/
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.previous-run.outputs.run-id }}
 
       - name: Run news fetcher
         env:
