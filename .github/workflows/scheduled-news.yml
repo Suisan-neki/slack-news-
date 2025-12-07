@@ -13,7 +13,7 @@ on:
 # 同時実行を防ぐ（同じ時間に複数回実行されないようにする）
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false  # 既に実行中のものはキャンセルしない（完了を待つ）
+  cancel-in-progress: true  # 既に実行中のものはキャンセルして、新しい実行のみを実行
 
 jobs:
   send-news:
